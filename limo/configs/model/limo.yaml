@@ -16,4 +16,7 @@ scheduler:
   max_lr: 0.0001
   div_factor: 100
 
+# Optional: Camera info for better visualization during training
+camera_info: "${paths.root_dir}/limo/configs/model/camera_info.yaml"
+
 compile: false

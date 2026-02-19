@@ -1,7 +1,9 @@
-from typing import Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 import torch
 import wandb
 import numpy as np
+import yaml
 from lightning import LightningModule
 from torchmetrics import MeanMetric, MinMetric
 from torchmetrics.regression import MeanAbsoluteError
@@ -17,6 +19,7 @@ class LimoModel(LightningModule):
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler,
         compile: bool,
+        camera_info: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -33,6 +36,23 @@ class LimoModel(LightningModule):
         self.test_mae = MeanAbsoluteError()
 
         self.val_loss_best = MinMetric()
+        self.camera_info = self._load_camera_info(camera_info)
+
+    def _load_camera_info(
+        self, camera_info_path: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        if camera_info_path is None:
+            return None
+
+        path = Path(camera_info_path)
+        if not path.exists():
+            self.print(
+                f"camera_info file not found: {camera_info_path}. Falling back to image-only visualization."
+            )
+            return None
+
+        with path.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         return self.net(batch)
@@ -185,7 +205,7 @@ class LimoModel(LightningModule):
                     predicted_paths[i],
                 ],  # GT first, then prediction
                 goals[i : i + 1],  # Wrap goal as (1, 3) array
-                camera_info=None,
+                camera_info=self.camera_info,
             )
             visualizations.append(wandb.Image(combined_img))
 
