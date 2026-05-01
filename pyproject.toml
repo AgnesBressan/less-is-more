@@ -24,6 +24,10 @@ dependencies = [
   "safetensors>=0.4.5",
   "huggingface-hub>=1.4.1",
   "zarr>=2.18.3",
+  "tqdm>=4.0",
+  "FastGeodis",
+  "setuptools<70",
+  "wheel",
 ]
 
 [build-system]
@@ -48,4 +52,4 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["limo*", "dataset*", "dataset_builder*", "helpers*", "mppi_planner*", "ros_package*"]
+include = ["limo*", "dataset*", "dataset_builder*", "helpers*", "mppi_planner*", "ros_package*", "utils*"]
