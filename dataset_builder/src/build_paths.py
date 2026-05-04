@@ -75,48 +75,52 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
     start  = torch.zeros(3, dtype=torch.float32, device=device)
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
 
-    for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
-        if viz is not None:
-            if not plt.fignum_exists(viz["fig"].number):
-                break
-            viz["fig"].canvas.flush_events()
+    interrupted = False
+    try:
+        for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
+            if viz is not None:
+                if not plt.fignum_exists(viz["fig"].number):
+                    break
+                viz["fig"].canvas.flush_events()
 
-        elev_np = source.get_elevation(i)
-        if np.isnan(elev_np).mean() > cfg.max_nan_frac:
-            continue
-        if not _check_min_nan_dist(elev_np, cfg.min_nan_dist_cells):
-            continue
+            elev_np = source.get_elevation(i)
+            if np.isnan(elev_np).mean() > cfg.max_nan_frac:
+                continue
+            if not _check_min_nan_dist(elev_np, cfg.min_nan_dist_cells):
+                continue
 
-        gm = GridMap2D(
-            elevation=torch.from_numpy(elev_np).to(device).T,
-            resolution=cfg.map_resolution,
-            origin_xy=origin,
-        )
+            gm = GridMap2D(
+                elevation=torch.from_numpy(elev_np).to(device).T,
+                resolution=cfg.map_resolution,
+                origin_xy=origin,
+            )
 
-        frame_paths, frame_goals = [], []
-        for _ in range(cfg.paths_per_image):
-            goal   = _sample_geo_goal(rng)
-            states = planner.plan(gm, start, torch.from_numpy(goal).to(device))
-            frame_paths.append(states.cpu().numpy().astype(np.float32))
-            frame_goals.append(goal)
-            paths_list.append(frame_paths[-1])
-            goals_list.append(goal)
-            image_ids_list.append(i)
-            goal_times_list.append(float(cfg.goal_time))
+            frame_paths, frame_goals = [], []
+            for _ in range(cfg.paths_per_image):
+                goal   = _sample_geo_goal(rng)
+                states = planner.plan(gm, start, torch.from_numpy(goal).to(device))
+                frame_paths.append(states.cpu().numpy().astype(np.float32))
+                frame_goals.append(goal)
+                paths_list.append(frame_paths[-1])
+                goals_list.append(goal)
+                image_ids_list.append(i)
+                goal_times_list.append(float(cfg.goal_time))
 
-        if viz is not None and i % viz["every"] == 0:
-            from dataset_builder.src.visualize import draw_frame
-            draw_frame(viz["axes"], viz["fig"], source, planner,
-                       frame_paths, frame_goals, i, elev_np,
-                       viz["rob_w"], viz["rob_h"], viz["cams"])
-            viz["fig"].canvas.draw()
-            plt.pause(viz["delay"])
-
-    n = len(paths_list)
-    if n > 0:
-        _write_zarr(mission_dir / "data" / "geometric_paths",
-                    paths_list, goals_list, image_ids_list, goal_times_list)
-    return n
+            if viz is not None and i % viz["every"] == 0:
+                from dataset_builder.src.visualize import draw_frame
+                draw_frame(viz["axes"], viz["fig"], source, planner,
+                           frame_paths, frame_goals, i, elev_np,
+                           viz["rob_w"], viz["rob_h"], viz["cams"])
+                viz["fig"].canvas.draw()
+                plt.pause(viz["delay"])
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        n = len(paths_list)
+        if n > 0:
+            _write_zarr(mission_dir / "data" / "geometric_paths",
+                        paths_list, goals_list, image_ids_list, goal_times_list)
+    return n, interrupted
 
 
 # ── D_tel ──────────────────────────────────────────────────────────────────────
@@ -124,27 +128,31 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
 def _build_tel_mission(source, mission_dir, cfg, rng) -> int:
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
 
-    for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
-        goal_time = max(abs(float(rng.normal(cfg.goal_time_mean, cfg.goal_time_std))), 0.5)
+    interrupted = False
+    try:
+        for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
+            goal_time = max(abs(float(rng.normal(cfg.goal_time_mean, cfg.goal_time_std))), 0.5)
 
-        traj_world = source.get_trajectory_world(i, duration=goal_time, n=50)
-        pose_world = source.get_pose_se2_world(i)
-        path_base  = transform_se2_odom_to_base(traj_world, convert_se2_to_transform(pose_world))
-        goal_base  = path_base[-1]
+            traj_world = source.get_trajectory_world(i, duration=goal_time, n=50)
+            pose_world = source.get_pose_se2_world(i)
+            path_base  = transform_se2_odom_to_base(traj_world, convert_se2_to_transform(pose_world))
+            goal_base  = path_base[-1]
 
-        if np.linalg.norm(path_base[0, :2] - path_base[-1, :2]) < 0.1:
-            continue
+            if np.linalg.norm(path_base[0, :2] - path_base[-1, :2]) < 0.1:
+                continue
 
-        paths_list.append(path_base.astype(np.float32))
-        goals_list.append(goal_base.astype(np.float32))
-        image_ids_list.append(i)
-        goal_times_list.append(float(goal_time))
-
-    n = len(paths_list)
-    if n > 0:
-        _write_zarr(mission_dir / "data" / "teleop_paths",
-                    paths_list, goals_list, image_ids_list, goal_times_list)
-    return n
+            paths_list.append(path_base.astype(np.float32))
+            goals_list.append(goal_base.astype(np.float32))
+            image_ids_list.append(i)
+            goal_times_list.append(float(goal_time))
+    except KeyboardInterrupt:
+        interrupted = True
+    finally:
+        n = len(paths_list)
+        if n > 0:
+            _write_zarr(mission_dir / "data" / "teleop_paths",
+                        paths_list, goals_list, image_ids_list, goal_times_list)
+    return n, interrupted
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -231,12 +239,15 @@ def main(cfg: DictConfig) -> None:
             viz_ctx["cams"] = load_cameras(mission_dir)
 
         if dataset_type == "geo":
-            n = _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz_ctx)
+            n, interrupted = _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz_ctx)
         else:
-            n = _build_tel_mission(source, mission_dir, cfg, rng)
+            n, interrupted = _build_tel_mission(source, mission_dir, cfg, rng)
 
         log.info(f"[{mission_ts}] wrote {n} samples")
         total += n
+        if interrupted:
+            log.info("Interrupted.")
+            break
 
     if use_viz:
         plt.ioff()
