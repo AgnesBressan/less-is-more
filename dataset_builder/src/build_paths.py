@@ -76,6 +76,11 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
 
     for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
+        if viz is not None:
+            if not plt.fignum_exists(viz["fig"].number):
+                break
+            viz["fig"].canvas.flush_events()
+
         elev_np = source.get_elevation(i)
         if np.isnan(elev_np).mean() > cfg.max_nan_frac:
             continue
@@ -100,8 +105,6 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
             goal_times_list.append(float(cfg.goal_time))
 
         if viz is not None and i % viz["every"] == 0:
-            if not plt.fignum_exists(viz["fig"].number):
-                break
             from dataset_builder.src.visualize import draw_frame
             draw_frame(viz["axes"], viz["fig"], source, planner,
                        frame_paths, frame_goals, i, elev_np,
@@ -169,6 +172,38 @@ def main(cfg: DictConfig) -> None:
 
     use_viz = cfg.get("viz", False)
     viz_ctx = None
+
+    # Download all missions before opening the figure so there is no blank
+    # unresponsive window during network I/O.
+    topics_main = ["hdr_front", "dlio_map_odometry"]
+    if cfg.get("fetch_side_cams") or use_viz:
+        topics_main += ["hdr_left", "hdr_right"]
+
+    log.info(f"Pulling data for {len(missions)} mission(s) ...")
+    pull_mission_topics(
+        missions=missions,
+        topics=topics_main,
+        dataset_folder=grandtour_dir,
+        revision=HF_REVISION_MAIN,
+        skip_existing=True,
+    )
+    if dataset_type == "geo":
+        pull_mission_topics(
+            missions=missions,
+            topics=["elevation_map"],
+            dataset_folder=grandtour_dir,
+            revision=cfg.elevation_revision,
+            skip_existing=True,
+        )
+    elif dataset_type == "tel":
+        pull_mission_topics(
+            missions=missions,
+            topics=["teleop_paths"],
+            dataset_folder=grandtour_dir,
+            revision=HF_REVISION_LIMO,
+            skip_existing=True,
+        )
+
     if use_viz:
         from dataset_builder.src.visualize import make_figure
         plt.ion()
@@ -180,38 +215,13 @@ def main(cfg: DictConfig) -> None:
             "delay": float(cfg.get("viz_delay", 1.0)),
             "rob_w": rob_w,
             "rob_h": rob_h,
-            "cams":  None,  # loaded per mission below
+            "cams":  None,
         }
 
     log.info(f"Building D_{dataset_type} for {len(missions)} mission(s)")
     total = 0
     for mission_ts in missions:
         mission_dir = grandtour_dir / mission_ts
-        log.info(f"[{mission_ts}] pulling topics …")
-
-        pull_mission_topics(
-            missions=[mission_ts],
-            topics=["hdr_front", "dlio_map_odometry"],
-            dataset_folder=grandtour_dir,
-            revision=HF_REVISION_MAIN,
-            skip_existing=True,
-        )
-        if dataset_type == "geo":
-            pull_mission_topics(
-                missions=[mission_ts],
-                topics=["elevation_map"],
-                dataset_folder=grandtour_dir,
-                revision=cfg.elevation_revision,
-                skip_existing=True,
-            )
-        elif dataset_type == "tel":
-            pull_mission_topics(
-                missions=[mission_ts],
-                topics=["teleop_paths"],
-                dataset_folder=grandtour_dir,
-                revision=HF_REVISION_LIMO,
-                skip_existing=True,
-            )
 
         source = GrandTourZarrSource(mission_dir, cfg.map_size, cfg.map_resolution)
         log.info(f"[{mission_ts}] {len(source)} frames")

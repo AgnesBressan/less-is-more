@@ -54,8 +54,9 @@ missions:
 
 dataset_type: geo  # geo | tel
 paths_per_image: 10
+fetch_side_cams: false
 viz: false
-viz_every: 50
+viz_every: 1
 viz_delay: 1.0
 max_nan_frac: 0.75
 min_nan_dist_cells: 10
