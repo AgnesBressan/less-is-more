@@ -16,13 +16,16 @@
 
 ## Installation
 
-This project uses [uv](https://docs.astral.sh/uv/) for dependency management. We assume an NVIDIA GPU with driver version ≥530 (for CUDA 12.1 support).
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Tested on Ubuntu 22.04, Python 3.10, NVIDIA GPU with driver version ≥530 (CUDA 12.1).
 
 ```bash
-git clone https://github.com/leggedrobotics/less-is-more \
-  && cd less-is-more \
-  && uv sync \
-  && uv pip install -e .
+git clone https://github.com/leggedrobotics/less-is-more && cd less-is-more && uv sync
+```
+
+To also use the dataset builder (includes a pre-built [FastGeodis](https://github.com/masadcv/FastGeodis) wheel for Linux x86_64 / Python 3.10):
+
+```bash
+uv sync --extra dataset_builder
 ```
 
 The codebase uses [Hydra](https://hydra.cc/) for configuration management in the `limo` package.

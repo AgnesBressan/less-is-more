@@ -25,10 +25,10 @@ dependencies = [
   "huggingface-hub>=1.4.1",
   "zarr>=2.18.3",
   "tqdm>=4.0",
-  "FastGeodis",
-  "setuptools<70",
-  "wheel",
 ]
+
+[project.optional-dependencies]
+dataset_builder = ["FastGeodis", "PyQt5"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -43,6 +43,7 @@ explicit = true
 torch = { index = "pytorch-cu121" }
 torchvision = { index = "pytorch-cu121" }
 torchaudio = { index = "pytorch-cu121" }
+FastGeodis = { path = "vendor/FastGeodis-1.0.5-cp310-cp310-linux_x86_64.whl" }
 
 [tool.ruff]
 lint.ignore = []
