@@ -54,6 +54,7 @@ missions:
 
 dataset_type: geo  # geo | tel
 paths_per_image: 10
+skip_first_frames: 0
 fetch_side_cams: false
 viz: false
 viz_every: 1

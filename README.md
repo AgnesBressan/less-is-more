@@ -132,17 +132,17 @@ By default, training uses [Weights & Biases](https://wandb.ai/) for logging.
 
 The `dataset_builder` package generates training samples from Grand Tour missions. It runs the MPPI geometric planner over pre-computed elevation maps to produce goal-conditioned paths, writing output in the same zarr format consumed by the training pipeline. Required topics are downloaded from HuggingFace automatically.
 
-### Quick start: build and train on 3 missions
+### Quick start: build and train on 2 missions
 
 ```bash
-# Build D_geo paths for the three ETH missions (1 path/frame, ~10 min)
+# Build D_geo paths for 2 missions - ETH outdoor + Jungfraujoch (1 path/frame, skip first 200 frames)
 uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo
 
-# Train on the result
-uv run limo/src/train.py dataset=limo_local
+# Quick training run on the result (5 epochs, 5% of data)
+uv run limo/src/train.py experiment=train_limo_debug dataset=limo_local
 ```
 
-Output goes to `data/dataset_builder/`. The `limo_local` dataset config points there and uses `missions_split_example.csv` (the same three missions, split into train/val/test).
+Output goes to `data/dataset_builder/`. The `limo_local` dataset config points there and uses `missions_split_example.csv` (the same two missions, split into train/val).
 
 ### Full build (all missions, as in the paper)
 
@@ -158,7 +158,7 @@ To train on all missions, override the missions CSV:
 
 ```bash
 uv run limo/src/train.py dataset=limo_local \
-  data.missions_csv=limo/configs/dataset/missions_split.csv
+  dataset.missions_csv=limo/configs/dataset/missions_split.csv
 ```
 
 ### Visualization
@@ -166,7 +166,7 @@ uv run limo/src/train.py dataset=limo_local \
 Pass `viz=true` to watch the planner and maps while building:
 
 ```bash
-uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo viz=true viz_every=50
+uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo viz=true
 ```
 
 ## Dataset
@@ -223,7 +223,7 @@ grandtour_mission_3,2024-01-17,test
 
 - Include only specific missions by adding rows to the CSV
 - Control split ratios by adjusting the number of missions per split
-- Quick debugging: Use a subset of missions (see `limo/configs/data/missions_split_debug.csv`)
+- Quick start: use `missions_split_example.csv` (2 missions, used by `train_limo_debug`)
 
 ## Citation
 

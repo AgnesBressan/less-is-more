@@ -10,7 +10,7 @@ Usage
 -----
   uv run dataset_builder/src/build_paths.py dataset_type=geo
   uv run dataset_builder/src/build_paths.py dataset_type=geo viz=true
-  uv run dataset_builder/src/build_paths.py --config-name build_debug dataset_type=geo viz=true
+  uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo viz=true
 """
 
 import logging
@@ -75,9 +75,10 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
     start  = torch.zeros(3, dtype=torch.float32, device=device)
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
 
+    skip_first = int(cfg.get("skip_first_frames", 0))
     interrupted = False
     try:
-        for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
+        for i in tqdm(range(skip_first, len(source)), desc=mission_dir.name, leave=False):
             if viz is not None:
                 if not plt.fignum_exists(viz["fig"].number):
                     break
@@ -128,9 +129,10 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, viz=None)
 def _build_tel_mission(source, mission_dir, cfg, rng) -> int:
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
 
+    skip_first = int(cfg.get("skip_first_frames", 0))
     interrupted = False
     try:
-        for i in tqdm(range(len(source)), desc=mission_dir.name, leave=False):
+        for i in tqdm(range(skip_first, len(source)), desc=mission_dir.name, leave=False):
             goal_time = max(abs(float(rng.normal(cfg.goal_time_mean, cfg.goal_time_std))), 0.5)
 
             traj_world = source.get_trajectory_world(i, duration=goal_time, n=50)
