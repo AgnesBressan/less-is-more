@@ -51,23 +51,23 @@ def convert_transform_to_se2(T: np.ndarray) -> np.ndarray:
     return np.array([x, y, yaw], dtype=float)
 
 
-def transform_se2_base_to_odom(se2_points_base: np.ndarray, t_odom_base: np.ndarray) -> np.ndarray:
+def transform_se2_base_to_odom(se2_points_base: np.ndarray, T_odom_base: np.ndarray) -> np.ndarray:
     """
     Transform SE(2) poses from the 'base' frame into the 'odom' frame.
 
     Args:
         se2_points_base: np.ndarray of shape (N, 3), poses [x, y, yaw] in base frame
-        t_odom_base:     np.ndarray of shape (4, 4), homogeneous transform odom->base
+        T_odom_base:     np.ndarray of shape (4, 4), transform that maps points from base frame into odom frame
 
     Returns:
         se2_points_odom: np.ndarray of shape (N, 3), poses [x, y, yaw] in odom frame
     """
     if se2_points_base.ndim != 2 or se2_points_base.shape[1] != 3:
         raise ValueError("se2_points_base must be shape (N, 3)")
-    if t_odom_base.shape != (4, 4):
-        raise ValueError("t_odom_base must be a 4x4 matrix")
+    if T_odom_base.shape != (4, 4):
+        raise ValueError("T_odom_base must be a 4x4 matrix")
 
-    se2_pose_in_odom = convert_transform_to_se2(t_odom_base)
+    se2_pose_in_odom = convert_transform_to_se2(T_odom_base)
 
     yaw = se2_pose_in_odom[2]
     r_odom_base = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
@@ -89,7 +89,7 @@ def transform_se2_odom_to_base(se2_points_odom: np.ndarray, T_odom_base: np.ndar
 
     Args:
         se2_points_odom: np.ndarray of shape (N, 3), poses [x, y, yaw] in odom frame
-        T_odom_base:     np.ndarray of shape (4, 4), homogeneous transform odom->base
+        T_odom_base:     np.ndarray of shape (4, 4), transform that maps base-frame points into odom frame
 
     Returns:
         se2_points_base: np.ndarray of shape (N, 3), poses [x, y, yaw] in base frame
@@ -97,7 +97,7 @@ def transform_se2_odom_to_base(se2_points_odom: np.ndarray, T_odom_base: np.ndar
     if se2_points_odom.ndim != 2 or se2_points_odom.shape[1] != 3:
         raise ValueError("se2_points_odom must be shape (N, 3)")
     if T_odom_base.shape != (4, 4):
-        raise ValueError("t_odom_base must be a 4x4 matrix")
+        raise ValueError("T_odom_base must be a 4x4 matrix")
 
     se2_pose_in_odom = convert_transform_to_se2(T_odom_base)
 

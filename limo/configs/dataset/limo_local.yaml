@@ -8,8 +8,10 @@ dataset_folder: ${paths.data_dir}/dataset_builder
 # Use a custom CSV pointing at only the missions you have built locally.
 missions_csv: ${paths.root_dir}/limo/configs/dataset/missions_split_example.csv
 
-# Dataset type: "tel" (teleoperation), "geo" (geometric), or "aug" (both)
-dataset_type: "aug"
+# Dataset type: "tel" (teleoperation), "geo" (geometric), or "aug" (both).
+# Default is "geo" because the example quickstart only builds geo paths.
+# Set to "aug" after also running: uv run dataset_builder/src/build_paths.py dataset_type=tel
+dataset_type: "geo"
 
 batch_size: 16
 num_workers: 8

@@ -9,10 +9,10 @@ from typing import Optional, Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 from dataset_builder.mppi_planner.fast_geodis_wrapper import fast_gdf_wrapper
-from dataset_builder.mppi_planner.mppi_optimizer import MPPIConfig, MPPIOptimizer
+from dataset_builder.mppi_planner.mppi_optimizer import MPPIOptimizer
 from dataset_builder.mppi_planner.traversability_filter import get_filter_torch
 
 log = logging.getLogger(__name__)
@@ -128,6 +128,14 @@ class MPPIObjective:
             self.set_map(gm)
         self._gdf = self._compute_gdf()
 
+    @property
+    def trav(self) -> Optional[torch.Tensor]:
+        return self._trav
+
+    @property
+    def gdf(self) -> Optional[torch.Tensor]:
+        return self._gdf
+
     @torch.no_grad()
     def evaluate(self, population: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         u = self.zero_small_actions(population.clone())
@@ -151,8 +159,12 @@ class MPPIObjective:
         x0, y0, yaw0 = self._start
         vxvy = population[:, :, :2] * dt
         wz = population[:, :, 2] * dt
-        yaw = yaw0 + torch.cumsum(wz, dim=1)
-        cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
+        yaw_cum = torch.cumsum(wz, dim=1)
+        # Use pre-step yaw for rotation: the heading the robot has when executing
+        # velocity command at step t is yaw before wz[t] is applied.
+        yaw_rot = yaw0 + torch.cat([torch.zeros(P, 1, device=wz.device), yaw_cum[:, :-1]], dim=1)
+        yaw = yaw0 + yaw_cum  # output waypoint yaw (heading after each step)
+        cos_y, sin_y = torch.cos(yaw_rot), torch.sin(yaw_rot)
         R = torch.stack([torch.stack([cos_y, -sin_y], dim=-1),
                          torch.stack([sin_y,  cos_y], dim=-1)], dim=-2)
         pos = torch.cumsum(torch.matmul(R, vxvy.unsqueeze(-1)).squeeze(-1), dim=1)
@@ -216,17 +228,18 @@ class MPPIObjective:
         trav = max_pool(trav, cfg.fatal_cells_buffer)
         trav[nan_mask] = torch.nan
 
-        b = 3
+        b = cfg.border_cells
         for sl in [np.s_[:, -b:], np.s_[:, :b], np.s_[-b:, :], np.s_[:b, :]]:
             trav[sl] = torch.nan
 
         t = trav[~nan_mask]
+        orig = t.clone()
         slope = cfg.risky_value / (cfg.risky_th - cfg.safe_th)
-        t[t < cfg.safe_th] = 0
-        cautious = (t >= cfg.safe_th) & (t <= cfg.risky_th)
-        t[cautious] = (t[cautious] - cfg.safe_th) * slope
-        t[(t > cfg.risky_th) & (t < cfg.fatal_th)] = cfg.risky_value
-        t[t > cfg.fatal_th] = cfg.fatal_value
+        t[orig < cfg.safe_th] = 0
+        cautious = (orig >= cfg.safe_th) & (orig <= cfg.risky_th)
+        t[cautious] = (orig[cautious] - cfg.safe_th) * slope
+        t[(orig > cfg.risky_th) & (orig < cfg.fatal_th)] = cfg.risky_value
+        t[orig >= cfg.fatal_th] = cfg.fatal_value
         trav[~nan_mask] = t
         return trav
 
@@ -234,7 +247,7 @@ class MPPIObjective:
     def _compute_gdf(self) -> torch.Tensor:
         cfg = self.cfg
         elev = self._gm.elevation.to(self.device)
-        gdf_mask = (self._trav >= cfg.fatal_th).float()
+        gdf_mask = (self._trav >= cfg.fatal_value).float()
         gdf_mask[torch.isnan(self._trav)] = 0.0
         gdf_mask = (max_pool(gdf_mask, cfg.gdf_obstacle_buffer) > 0).float().unsqueeze(0)
         goal_ij = clip_on_ray(elev.shape, world_to_map_idx(self._goal[None, :2], self._gm)[0])
@@ -242,7 +255,6 @@ class MPPIObjective:
             gdf_mask.float()[None],
             int(goal_ij[0]),
             int(goal_ij[1]),
-            torch.nan,
         )[0] * self._gm.resolution
 
     @torch.no_grad()
@@ -280,20 +292,8 @@ class MPPIPlanner:
     def __init__(self, cfg, device: str):
         """cfg: OmegaConf DictConfig (the mppi: section of build.yaml)."""
         self.device = device
-        mppi_cfg = MPPIConfig(
-            horizon=cfg.horizon,
-            action_dim=3,
-            population_size=cfg.population_size,
-            num_iterations=cfg.num_iterations,
-            beta=cfg.beta,
-            gamma=cfg.gamma,
-            sigma=cfg.sigma,
-            provide_zero_action=cfg.provide_zero_action,
-            lower_bound=list(OmegaConf.to_container(cfg.lower_bound, resolve=True)),
-            upper_bound=list(OmegaConf.to_container(cfg.upper_bound, resolve=True)),
-        )
         self.objective = MPPIObjective(cfg, device)
-        self.optimizer = MPPIOptimizer(mppi_cfg, device)
+        self.optimizer = MPPIOptimizer(cfg, device)
 
     @torch.no_grad()
     def plan(self, gridmap: GridMap2D, start: torch.Tensor, goal: torch.Tensor) -> torch.Tensor:

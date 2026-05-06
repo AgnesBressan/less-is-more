@@ -58,7 +58,7 @@ paths_per_image: 10
 skip_first_frames: 0
 fetch_side_cams: false
 viz: false
-viz_every: 1
+viz_every: 50
 viz_delay: 1.0
 max_nan_frac: 0.75
 min_nan_dist_cells: 10
@@ -69,6 +69,12 @@ map_resolution: 0.04
 goal_time: 5.0
 goal_time_mean: 5.0
 goal_time_std: 2.5
+goal_x_mean: 5.0
+goal_y_mean: 0.0
+goal_yaw_mean: 0.0
+goal_x_std: 2.5
+goal_y_std: 2.0
+goal_yaw_std: 0.785  # pi/4
 
 mppi:
   # Integration
@@ -120,6 +126,7 @@ mppi:
   fatal_value: 100000.0
   fatal_cells_buffer: 0
   gdf_obstacle_buffer: 1
+  border_cells: 3
 
 hydra:
   run:

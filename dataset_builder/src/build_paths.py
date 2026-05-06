@@ -15,6 +15,7 @@ Usage
 
 import logging
 import shutil
+import sys
 from pathlib import Path
 
 import hydra
@@ -28,19 +29,15 @@ from tqdm import tqdm
 from dataset_builder.helpers.transform_helpers import transform_se2_odom_to_base, convert_se2_to_transform
 from dataset_builder.mppi_planner.mppi_planner import GridMap2D, MPPIPlanner
 from dataset_builder.src.mission_data_source import GrandTourZarrSource
-from utils.grandtour_hub import HF_REVISION_MAIN, HF_REVISION_LIMO, pull_mission_topics
+from utils.grandtour_hub import HF_REVISION_MAIN, pull_mission_topics
 
 log = logging.getLogger(__name__)
 
-_GOAL_MEAN = np.array([5.0, 0.0, 0.0])
-_GOAL_COV  = np.diag([2.5**2, 2.0**2, (np.pi / 4) ** 2])
-
-
 def _resolve_paths(cfg: DictConfig) -> None:
     root = Path(__file__).resolve().parents[2]
-    p = Path(cfg["dataset_folder"])
+    p = Path(cfg.dataset_folder)
     if not p.is_absolute():
-        cfg["dataset_folder"] = str(root / p)
+        cfg.dataset_folder = str(root / p)
 
 
 def _write_zarr(zarr_dir: Path, paths, goals, image_ids, goal_times, write_mode: str = "overwrite") -> None:
@@ -71,28 +68,31 @@ def _write_zarr(zarr_dir: Path, paths, goals, image_ids, goal_times, write_mode:
 
 # ── D_geo ──────────────────────────────────────────────────────────────────────
 
-def _sample_geo_goal(rng: np.random.Generator) -> np.ndarray:
-    pose = rng.multivariate_normal(_GOAL_MEAN, _GOAL_COV).astype(np.float32)
-    pose[0] = abs(pose[0])
+def _sample_geo_goal(rng: np.random.Generator, cfg) -> np.ndarray:
+    mean = np.array([cfg.goal_x_mean, cfg.goal_y_mean, cfg.goal_yaw_mean])
+    cov  = np.diag([cfg.goal_x_std**2, cfg.goal_y_std**2, cfg.goal_yaw_std**2])
+    pose = rng.multivariate_normal(mean, cov).astype(np.float32)
     return pose
 
 
 def _check_min_nan_dist(elev: np.ndarray, min_cells: int) -> bool:
-    t = torch.from_numpy(elev)
-    nan_mask = torch.isnan(t)
+    nan_mask = np.isnan(elev)
     if not nan_mask.any():
         return True
-    H, W = t.shape
-    rows, cols = torch.where(nan_mask)
-    dist = torch.sqrt(((rows - H // 2).float() ** 2 + (cols - W // 2).float() ** 2))
-    return dist.min().item() >= min_cells
+    H, W = elev.shape
+    rows, cols = np.where(nan_mask)
+    dist = np.sqrt(((rows - H // 2) ** 2 + (cols - W // 2) ** 2).astype(float))
+    return float(dist.min()) >= min_cells
 
 
-def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, write_mode, viz=None) -> int:
-    origin = torch.tensor([-cfg.map_size, -cfg.map_size], dtype=torch.float32, device=device)
-    start  = torch.zeros(3, dtype=torch.float32, device=device)
+def _build_mission(source, mission_dir, zarr_subdir, cfg, write_mode, viz, step_fn) -> tuple[int, bool]:
+    """Run the per-frame loop and write zarr output.
+
+    step_fn(i) -> (records, viz_data)
+      records:  list of (path, goal, goal_time) tuples — empty = skip frame
+      viz_data: (elev_np, planner_or_none) used when viz triggers, or None
+    """
     paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
-
     skip_first = int(cfg.get("skip_first_frames", 0))
     interrupted = False
     try:
@@ -102,34 +102,18 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, write_mod
                     break
                 viz["fig"].canvas.flush_events()
 
-            elev_np = source.get_elevation(i)
-            if np.isnan(elev_np).mean() > cfg.max_nan_frac:
-                continue
-            if not _check_min_nan_dist(elev_np, cfg.min_nan_dist_cells):
-                continue
-
-            gm = GridMap2D(
-                elevation=torch.from_numpy(elev_np).to(device),
-                resolution=cfg.map_resolution,
-                origin_xy=origin,
-            )
-
-            planner.objective.set_map(gm)
-            frame_paths, frame_goals = [], []
-            for _ in range(cfg.paths_per_image):
-                goal   = _sample_geo_goal(rng)
-                states = planner.plan(gm, start, torch.from_numpy(goal).to(device))
-                frame_paths.append(states.cpu().numpy().astype(np.float32))
-                frame_goals.append(goal)
-                paths_list.append(frame_paths[-1])
+            records, viz_data = step_fn(i)
+            for path, goal, goal_time in records:
+                paths_list.append(path)
                 goals_list.append(goal)
                 image_ids_list.append(i)
-                goal_times_list.append(float(cfg.goal_time))
+                goal_times_list.append(goal_time)
 
-            if viz is not None and i % viz["every"] == 0:
+            if viz is not None and records and i % viz["every"] == 0:
                 from dataset_builder.src.visualize import draw_frame
-                draw_frame(viz["axes"], viz["fig"], source, planner,
-                           frame_paths, frame_goals, i, elev_np,
+                elev_np, planner_for_viz = viz_data
+                draw_frame(viz["axes"], viz["fig"], source, planner_for_viz,
+                           [r[0] for r in records], [r[1] for r in records], i, elev_np,
                            viz["rob_w"], viz["rob_h"], viz["cams"],
                            viz["resolution"], viz["n_cells"])
                 viz["fig"].canvas.draw()
@@ -139,57 +123,51 @@ def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, write_mod
     finally:
         n = len(paths_list)
         if n > 0:
-            _write_zarr(mission_dir / "data" / "geometric_paths",
+            _write_zarr(mission_dir / "data" / zarr_subdir,
                         paths_list, goals_list, image_ids_list, goal_times_list, write_mode)
-    return n, interrupted
+    return len(paths_list), interrupted
+
+
+def _build_geo_mission(source, mission_dir, planner, cfg, rng, device, write_mode, viz=None) -> tuple[int, bool]:
+    origin = torch.tensor([-cfg.map_size, -cfg.map_size], dtype=torch.float32, device=device)
+    start  = torch.zeros(3, dtype=torch.float32, device=device)
+
+    def step_fn(i):
+        elev_np = source.get_elevation(i)
+        if np.isnan(elev_np).mean() > cfg.max_nan_frac:
+            return [], None
+        if not _check_min_nan_dist(elev_np, cfg.min_nan_dist_cells):
+            return [], None
+        gm = GridMap2D(
+            elevation=torch.from_numpy(elev_np).to(device),
+            resolution=cfg.map_resolution,
+            origin_xy=origin,
+        )
+        records = []
+        for _ in range(cfg.paths_per_image):
+            goal   = _sample_geo_goal(rng, cfg)
+            states = planner.plan(gm, start, torch.from_numpy(goal).to(device))
+            records.append((states.cpu().numpy().astype(np.float32), goal, float(cfg.goal_time)))
+        return records, (elev_np, planner)
+
+    return _build_mission(source, mission_dir, "geometric_paths", cfg, write_mode, viz, step_fn)
 
 
 # ── D_tel ──────────────────────────────────────────────────────────────────────
 
-def _build_tel_mission(source, mission_dir, cfg, rng, write_mode, viz=None) -> int:
-    paths_list, goals_list, image_ids_list, goal_times_list = [], [], [], []
+def _build_tel_mission(source, mission_dir, cfg, rng, write_mode, viz=None) -> tuple[int, bool]:
+    def step_fn(i):
+        goal_time = max(abs(float(rng.normal(cfg.goal_time_mean, cfg.goal_time_std))), 0.5)
+        traj_world = source.get_trajectory_world(i, duration=goal_time, n=50)
+        pose_world = source.get_pose_se2_world(i)
+        path_base  = transform_se2_odom_to_base(traj_world, convert_se2_to_transform(pose_world))
+        goal_base  = path_base[-1]
+        if np.linalg.norm(path_base[0, :2] - path_base[-1, :2]) < 0.1:
+            return [], None
+        elev_np = source.get_elevation(i) if viz is not None else None
+        return [(path_base.astype(np.float32), goal_base.astype(np.float32), float(goal_time))], (elev_np, None)
 
-    skip_first = int(cfg.get("skip_first_frames", 0))
-    interrupted = False
-    try:
-        for i in tqdm(range(skip_first, len(source)), desc=mission_dir.name, leave=False):
-            if viz is not None:
-                if not plt.fignum_exists(viz["fig"].number):
-                    break
-                viz["fig"].canvas.flush_events()
-
-            goal_time = max(abs(float(rng.normal(cfg.goal_time_mean, cfg.goal_time_std))), 0.5)
-
-            traj_world = source.get_trajectory_world(i, duration=goal_time, n=50)
-            pose_world = source.get_pose_se2_world(i)
-            path_base  = transform_se2_odom_to_base(traj_world, convert_se2_to_transform(pose_world))
-            goal_base  = path_base[-1]
-
-            if np.linalg.norm(path_base[0, :2] - path_base[-1, :2]) < 0.1:
-                continue
-
-            paths_list.append(path_base.astype(np.float32))
-            goals_list.append(goal_base.astype(np.float32))
-            image_ids_list.append(i)
-            goal_times_list.append(float(goal_time))
-
-            if viz is not None and i % viz["every"] == 0:
-                from dataset_builder.src.visualize import draw_frame
-                elev_np = source.get_elevation(i)
-                draw_frame(viz["axes"], viz["fig"], source, None,
-                           [path_base], [goal_base], i, elev_np,
-                           viz["rob_w"], viz["rob_h"], viz["cams"],
-                           viz["resolution"], viz["n_cells"])
-                viz["fig"].canvas.draw()
-                plt.pause(viz["delay"])
-    except KeyboardInterrupt:
-        interrupted = True
-    finally:
-        n = len(paths_list)
-        if n > 0:
-            _write_zarr(mission_dir / "data" / "teleop_paths",
-                        paths_list, goals_list, image_ids_list, goal_times_list, write_mode)
-    return n, interrupted
+    return _build_mission(source, mission_dir, "teleop_paths", cfg, write_mode, viz, step_fn)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -199,7 +177,8 @@ def main(cfg: DictConfig) -> None:
     _resolve_paths(cfg)
 
     dataset_type = cfg.get("dataset_type", "geo")
-    assert dataset_type in ("geo", "tel"), f"dataset_type must be 'geo' or 'tel', got {dataset_type!r}"
+    if dataset_type not in ("geo", "tel"):
+        raise ValueError(f"dataset_type must be 'geo' or 'tel', got {dataset_type!r}")
 
     torch.manual_seed(cfg.seed)
     rng    = np.random.default_rng(cfg.seed)
@@ -218,7 +197,11 @@ def main(cfg: DictConfig) -> None:
             log.warning(f"{len(existing)} mission(s) already have '{zarr_subdir}' data:")
             for m in existing:
                 log.warning(f"  {m}")
-            answer = input("Delete existing data and rebuild from scratch? [y/N]: ").strip().lower()
+            if sys.stdin.isatty():
+                answer = input("Delete existing data and rebuild from scratch? [y/N]: ").strip().lower()
+            else:
+                log.warning("Non-interactive mode: aborting. Use write_mode=append or remove existing data manually.")
+                return
             if answer != "y":
                 log.info("Aborted. Use write_mode=append to add to existing data.")
                 return
@@ -227,10 +210,6 @@ def main(cfg: DictConfig) -> None:
                 log.info(f"Removed {m}/data/{zarr_subdir}")
 
     planner = MPPIPlanner(cfg.mppi, device) if dataset_type == "geo" else None
-
-    fp     = cfg.mppi.footprint[0]
-    rob_w  = (fp[1][1] - fp[0][1]) / cfg.map_resolution
-    rob_h  = (fp[1][0] - fp[0][0]) / cfg.map_resolution
 
     use_viz = cfg.get("viz", False)
     viz_ctx = None
@@ -257,23 +236,18 @@ def main(cfg: DictConfig) -> None:
             revision=cfg.elevation_revision,
             skip_existing=True,
         )
-    elif dataset_type == "tel":
-        pull_mission_topics(
-            missions=missions,
-            topics=["teleop_paths"],
-            dataset_folder=grandtour_dir,
-            revision=HF_REVISION_LIMO,
-            skip_existing=True,
-        )
 
     if use_viz:
         from dataset_builder.src.visualize import make_figure
+        fp    = cfg.mppi.footprint[0]
+        rob_w = (fp[1][1] - fp[0][1]) / cfg.map_resolution
+        rob_h = (fp[1][0] - fp[0][0]) / cfg.map_resolution
         plt.ion()
         fig, axes = make_figure()
         viz_ctx = {
             "fig":        fig,
             "axes":       axes,
-            "every":      int(cfg.get("viz_every", 50)),
+            "every":      int(cfg.viz_every),
             "delay":      float(cfg.get("viz_delay", 1.0)),
             "rob_w":      rob_w,
             "rob_h":      rob_h,

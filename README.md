@@ -22,11 +22,13 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management. Te
 git clone https://github.com/leggedrobotics/less-is-more && cd less-is-more && uv sync
 ```
 
-To also use the dataset builder (includes a pre-built [FastGeodis](https://github.com/masadcv/FastGeodis) wheel for Linux x86_64 / Python 3.10):
+To also use the dataset builder:
 
 ```bash
 uv sync --extra dataset_builder
 ```
+
+> **Note**: The `dataset_builder` extra is only supported on **Linux x86_64 with Python 3.10**. It vendors a pre-built [FastGeodis](https://github.com/masadcv/FastGeodis) wheel because `pip install FastGeodis` requires a from-source CUDA build that is broken in the standard distribution.
 
 The codebase uses [Hydra](https://hydra.cc/) for configuration management in the `limo` package.
 
@@ -135,17 +137,20 @@ By default, training uses [Weights & Biases](https://wandb.ai/) for logging.
 
 The `dataset_builder` package generates training samples from Grand Tour missions. It runs the MPPI geometric planner over pre-computed elevation maps to produce goal-conditioned paths, writing output in the same zarr format consumed by the training pipeline. Required topics are downloaded from HuggingFace automatically.
 
-### Quick start: build and train on 2 missions
+### Quick start: build and train on 3 missions
 
 ```bash
-# Build D_geo paths for 2 missions - ETH outdoor + Jungfraujoch (1 path/frame, skip first 200 frames)
+# Build D_geo paths for 3 missions - ETH outdoor, Jungfraujoch, Construction site
+# (1 path/frame, skip first 1000 frames, ~15 min on a single GPU)
 uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo
 
-# Quick training run on the result (5 epochs, 5% of data)
-uv run limo/src/train.py experiment=train_limo_debug dataset=limo_local
+# Quick training run on the result (5 epochs, CSV logger — no WandB needed)
+uv run limo/src/train.py experiment=train_limo_local
 ```
 
-Output goes to `data/dataset_builder/`. The `limo_local` dataset config points there and uses `missions_split_example.csv` (the same two missions, split into train/val).
+Output goes to `data/dataset_builder/`. The `limo_local` dataset config points there and uses `missions_split_example.csv` (the same three missions, split into train/val/test). The default `dataset_type` is `geo`; to train on `aug` (geo + tel combined), also run `build_paths.py dataset_type=tel` first and then pass `dataset.dataset_type=aug`.
+
+`experiment=train_limo_local` is a shorthand that selects `dataset=limo_local` and switches the logger to CSV (no WandB needed). Alternatively, `experiment=train_limo_debug dataset=limo_local` runs the same data config but keeps the WandB logger.
 
 ### Full build (all missions, as in the paper)
 
@@ -171,6 +176,8 @@ Pass `viz=true` to watch the planner and maps while building:
 ```bash
 uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo viz=true
 ```
+
+> **Note on data availability**: The elevation maps (`elevation_revision: refs/pr/9`) and the pre-built LiMo path zarrs (`HF_REVISION_LIMO = "refs/pr/6"`) live on open HuggingFace PRs against `leggedrobotics/grand_tour_dataset` that have not yet been merged to `main`. The dataset builder downloads from these PR branches automatically; they will be updated to point at `main` once the PRs are merged.
 
 ## Dataset
 
@@ -226,7 +233,7 @@ grandtour_mission_3,2024-01-17,test
 
 - Include only specific missions by adding rows to the CSV
 - Control split ratios by adjusting the number of missions per split
-- Quick start: use `missions_split_example.csv` (2 missions, used by `train_limo_debug`)
+- Quick start: use `missions_split_example.csv` (3 missions: train/val/test, used by `train_limo_local`)
 
 ## Citation
 

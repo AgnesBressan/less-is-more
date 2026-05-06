@@ -1,3 +1,4 @@
+import logging
 import re
 import shutil
 import tarfile
@@ -5,6 +6,8 @@ from itertools import product
 from pathlib import Path
 
 from huggingface_hub import snapshot_download
+
+log = logging.getLogger(__name__)
 
 HF_REPO_ID = "leggedrobotics/grand_tour_dataset"
 HF_REVISION_MAIN = "main"
@@ -57,7 +60,7 @@ def _extract_to_folder(
     cache: Path, dest: Path, allow_patterns: list[str]
 ) -> None:
     regex = _patterns_to_regex(allow_patterns)
-    files = [f for f in cache.rglob("*") if regex.match(str(f))]
+    files = [f for f in cache.rglob("*") if regex.match(str(f.relative_to(cache)))]
     tar_files = [f for f in files if f.suffix == ".tar"]
     other_files = [f for f in files if f.suffix != ".tar" and f.is_file()]
 
@@ -68,7 +71,7 @@ def _extract_to_folder(
             with tarfile.open(src) as tar:
                 tar.extractall(path=dst_parent)
         except Exception as exc:
-            print(f"[grandtour_hub] Failed to extract {src}: {exc}")
+            log.warning("Failed to extract %s: %s", src, exc)
 
     for src in other_files:
         dst = dest / src.relative_to(cache)
@@ -80,5 +83,5 @@ def _patterns_to_regex(patterns: list[str]) -> re.Pattern:
     parts = []
     for p in patterns:
         p = re.escape(p).replace(r"\*", ".*").replace(r"\?", ".")
-        parts.append(f".*{p}$")
+        parts.append(f"^{p}$")
     return re.compile("|".join(parts))

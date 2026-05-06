@@ -20,7 +20,25 @@ import numpy as np
 import zarr
 from PIL import Image
 
-from dataset_builder.src.grand_tour_dataset import _nearest_idx, _quat_to_matrix
+
+def _quat_to_matrix(xyzw: np.ndarray) -> np.ndarray:
+    """Quaternion [x, y, z, w] -> 3x3 rotation matrix (numpy)."""
+    x, y, z, w = xyzw
+    return np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+    ], dtype=np.float64)
+
+
+def _nearest_idx(timestamps: np.ndarray, t: float) -> int:
+    """Return index of the nearest timestamp in a sorted array."""
+    idx = np.searchsorted(timestamps, t)
+    if idx == 0:
+        return 0
+    if idx >= len(timestamps):
+        return len(timestamps) - 1
+    return idx - 1 if (t - timestamps[idx - 1]) <= (timestamps[idx] - t) else idx
 
 
 class MissionDataSource(Protocol):
@@ -74,6 +92,14 @@ class GrandTourZarrSource:
         self._dlio_pos = np.array(self._z_dlio["pose_pos"])      # (M, 3)
         self._dlio_orien = np.array(self._z_dlio["pose_orien"])  # (M, 4) xyzw
 
+        self._side_ts: dict[str, np.ndarray | None] = {}
+        for _cam in ("hdr_left", "hdr_right"):
+            _zp = self.mission_dir / "data" / _cam
+            if _zp.exists():
+                self._side_ts[_cam] = np.array(zarr.open_group(str(_zp), mode="r")["timestamp"])
+            else:
+                self._side_ts[_cam] = None
+
     def __len__(self) -> int:
         return len(self._cam_ts)
 
@@ -99,15 +125,27 @@ class GrandTourZarrSource:
         return np.array([pos[0], pos[1], yaw], dtype=np.float32)
 
     def get_trajectory_world(self, i: int, duration: float, n: int) -> np.ndarray:
-        """Interpolate DLIO poses over [t_i, t_i + duration] at n equally-spaced steps."""
+        """Sample DLIO poses over [t_i, t_i + duration] at n equally-spaced steps (nearest-neighbour)."""
         t0 = self.get_timestamp(i)
         times = np.linspace(t0, t0 + duration, n)
-        waypoints = np.zeros((n, 3), dtype=np.float32)
-        for k, t in enumerate(times):
-            idx = _nearest_idx(self._dlio_ts, t)
-            pos = self._dlio_pos[idx]
-            orien = self._dlio_orien[idx]
-            R = _quat_to_matrix(orien)
-            yaw = float(np.arctan2(R[1, 0], R[0, 0])) - np.pi / 2
-            waypoints[k] = [pos[0], pos[1], yaw]
-        return waypoints
+        idxs = np.searchsorted(self._dlio_ts, times).clip(0, len(self._dlio_ts) - 1)
+        prev = (idxs - 1).clip(0)
+        use_prev = np.abs(self._dlio_ts[prev] - times) < np.abs(self._dlio_ts[idxs] - times)
+        idxs = np.where(use_prev, prev, idxs)
+        pos = self._dlio_pos[idxs]          # (n, 3)
+        orien = self._dlio_orien[idxs]      # (n, 4) xyzw
+        x, y, z, w = orien[:, 0], orien[:, 1], orien[:, 2], orien[:, 3]
+        yaw = np.arctan2(2 * (x * y + z * w), 1 - 2 * (y * y + z * z)) - np.pi / 2
+        return np.column_stack([pos[:, 0], pos[:, 1], yaw]).astype(np.float32)
+
+    def get_side_image(self, cam_name: str, front_frame_idx: int) -> np.ndarray | None:
+        """Return side camera image nearest in time to front_frame_idx, or None if not present."""
+        ts_side = self._side_ts.get(cam_name)
+        if ts_side is None:
+            idx = front_frame_idx
+        else:
+            idx = _nearest_idx(ts_side, self.get_timestamp(front_frame_idx))
+        img_path = self.mission_dir / "images" / cam_name / f"{idx:06d}.jpeg"
+        if not img_path.exists():
+            return None
+        return np.array(Image.open(img_path).convert("RGB"))

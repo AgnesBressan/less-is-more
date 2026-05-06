@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Literal, Optional, Tuple
 
 from lightning import LightningDataModule
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
@@ -120,7 +120,7 @@ class LocalLimoDataModule(LightningDataModule):
 
     def val_dataloader(self) -> DataLoader[Any]:
         if self.data_val is None:
-            raise RuntimeError("Validation dataset not loaded. Call setup() first.")
+            return DataLoader([])
         return DataLoader(
             self.data_val,
             batch_size=self.batch_size,
@@ -131,7 +131,7 @@ class LocalLimoDataModule(LightningDataModule):
 
     def test_dataloader(self) -> DataLoader[Any]:
         if self.data_test is None:
-            raise RuntimeError("Test dataset not loaded. Call setup() first.")
+            return DataLoader([])
         return DataLoader(
             self.data_test,
             batch_size=self.batch_size,
@@ -140,11 +140,3 @@ class LocalLimoDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
         )
 
-    def teardown(self, stage: Optional[str] = None) -> None:
-        pass
-
-    def state_dict(self) -> Dict[str, Any]:
-        return {}
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        pass

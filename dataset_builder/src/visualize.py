@@ -15,11 +15,7 @@ import numpy as np
 import yaml
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Rectangle
-from PIL import Image
 
-_RES = 0.04
-_N = 200
-_C = _N // 2
 _COLORS = ["#dd72d8", "#a4d8df", "#FF8A50", "#E64A19", "#0B3D91"]
 _FRONT_CAM_YAML = Path(__file__).resolve().parents[2] / "limo/configs/model/camera_info.yaml"
 _Z_GROUND = -0.57   # ground height in robot base frame [m]
@@ -48,8 +44,10 @@ def _load_front_cam(img_w: int, img_h: int) -> dict | None:
     sx = img_w / info["width"]
     sy = img_h / info["height"]
     K = np.array(info["K"], dtype=np.float64).reshape(3, 3)
-    K[0, 0] *= sx; K[0, 2] *= sx
-    K[1, 1] *= sy; K[1, 2] *= sy
+    K[0, 0] *= sx
+    K[0, 2] *= sx
+    K[1, 1] *= sy
+    K[1, 2] *= sy
     return {"K": K, "D": np.array(info["D"], dtype=np.float64),
             "E": np.array(info["E"], dtype=np.float64).reshape(4, 4)}
 
@@ -69,8 +67,10 @@ def _load_side_cam(mission_dir: Path, cam: str, img_w: int, img_h: int) -> dict 
                    np.array([t["x"], t["y"], t["z"]]))
     K = np.array(ci["K"], dtype=np.float64).reshape(3, 3)
     orig_w, orig_h = ci.get("width", img_w), ci.get("height", img_h)
-    K[0, 0] *= img_w / orig_w; K[0, 2] *= img_w / orig_w
-    K[1, 1] *= img_h / orig_h; K[1, 2] *= img_h / orig_h
+    K[0, 0] *= img_w / orig_w
+    K[0, 2] *= img_w / orig_w
+    K[1, 1] *= img_h / orig_h
+    K[1, 2] *= img_h / orig_h
     # Auto-detect wrong z direction: point 5 m left should be in front of hdr_left
     test_z = (E @ np.array([0, 5, 0, 1]))[2]
     if (test_z > 0) != (cam == "hdr_left"):
@@ -113,9 +113,10 @@ def _project_fisheye(xyz_base: np.ndarray, cam: dict, img_shape: tuple) -> np.nd
 
 # ── Drawing helpers ────────────────────────────────────────────────────────────
 
-def _path_to_px(path: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    col = (_C - 1) - path[:, 1] / _RES
-    row = (_C - 1) - path[:, 0] / _RES
+def _path_to_px(path: np.ndarray, resolution: float, n_cells: int) -> tuple[np.ndarray, np.ndarray]:
+    c = n_cells // 2
+    col = (c - 1) - path[:, 1] / resolution
+    row = (c - 1) - path[:, 0] / resolution
     return col, row
 
 
@@ -128,16 +129,17 @@ def _draw_map(ax, data: np.ndarray, cmap: str, vmin=None, vmax=None, title="") -
     ax.axis("off")
 
 
-def _overlay_maps(axes, paths, goals, colors, rob_w: float, rob_h: float) -> None:
+def _overlay_maps(axes, paths, goals, colors, rob_w: float, rob_h: float, resolution: float, n_cells: int) -> None:
+    c = n_cells // 2
     for ax in axes:
-        for path, goal, c in zip(paths, goals, colors):
-            col, row = _path_to_px(path)
-            ax.plot(col, row, "-", color=c, linewidth=3.0, alpha=0.9)
-        for goal, c in zip(goals, colors):
-            gcol, grow = _path_to_px(goal[None])
-            ax.plot(gcol[0], grow[0], "D", color=c, markersize=10, zorder=5)
+        for path, goal, col in zip(paths, goals, colors):
+            px_col, px_row = _path_to_px(path, resolution, n_cells)
+            ax.plot(px_col, px_row, "-", color=col, linewidth=3.0, alpha=0.9)
+        for goal, col in zip(goals, colors):
+            gcol, grow = _path_to_px(goal[None], resolution, n_cells)
+            ax.plot(gcol[0], grow[0], "D", color=col, markersize=10, zorder=5)
         ax.add_patch(Rectangle(
-            (_C - 1 - rob_w / 2, _C - 1 - rob_h / 2), rob_w, rob_h,
+            (c - 1 - rob_w / 2, c - 1 - rob_h / 2), rob_w, rob_h,
             linewidth=1, edgecolor="red", facecolor="red", alpha=0.85, zorder=6,
         ))
 
@@ -173,9 +175,11 @@ def draw_frame(
     goals: list,        # list of (3,) float32
     frame_idx: int,
     elev_np: np.ndarray,
-    rob_w: float,       # robot width in pixels (= metres / _RES)
+    rob_w: float,       # robot width in pixels (= metres / resolution)
     rob_h: float,
     cams: dict,         # output of load_cameras()
+    resolution: float = 0.04,
+    n_cells: int = 200,
 ) -> None:
     """Clear axes and render one frame in-place."""
     ax_left, ax_front, ax_right, ax_el, ax_tr, ax_gd = axes
@@ -185,32 +189,36 @@ def draw_frame(
     colors = [_COLORS[k % len(_COLORS)] for k in range(len(paths))]
     ts = source.get_timestamp(frame_idx)
 
-    img_left  = np.array(Image.open(source.mission_dir / "images" / "hdr_left"  / f"{frame_idx:06d}.jpeg").convert("RGB"))
+    img_left  = source.get_side_image("hdr_left",  frame_idx)
     img_front = source.get_image(frame_idx)
-    img_right = np.array(Image.open(source.mission_dir / "images" / "hdr_right" / f"{frame_idx:06d}.jpeg").convert("RGB"))
+    img_right = source.get_side_image("hdr_right", frame_idx)
 
     for ax, img, title, cam in [
         (ax_left,  img_left,  "hdr_left",  cams["left"] if cams else None),
         (ax_front, img_front, "hdr_front", cams["front"] if cams else None),
         (ax_right, img_right, "hdr_right", cams["right"] if cams else None),
     ]:
-        ax.imshow(img); ax.axis("off"); ax.set_title(title, fontsize=9)
+        ax.axis("off")
+        ax.set_title(title, fontsize=9)
+        if img is None:
+            continue
+        ax.imshow(img)
         if cam is not None:
             _overlay_cam(ax, img.shape[:2], paths, goals, colors, cam)
 
     vmin = float(np.nanpercentile(elev_np, 2))
     vmax = float(np.nanpercentile(elev_np, 98))
     _draw_map(ax_el, elev_np, "terrain", vmin=vmin, vmax=vmax, title="Elevation [m]")
-    _overlay_maps([ax_el], paths, goals, colors, rob_w, rob_h)
+    _overlay_maps([ax_el], paths, goals, colors, rob_w, rob_h, resolution, n_cells)
 
     if planner is not None:
-        trav_np = planner.objective._trav.squeeze().cpu().numpy()
-        gdf_np  = planner.objective._gdf.squeeze().cpu().numpy()
+        trav_np = planner.objective.trav.squeeze().cpu().numpy()
+        gdf_np  = planner.objective.gdf.squeeze().cpu().numpy()
         gdf_fin = gdf_np[np.isfinite(gdf_np)]
         gdf_max = float(np.percentile(gdf_fin, 95)) if len(gdf_fin) else 10.0
         _draw_map(ax_tr, trav_np,                                         "coolwarm",  vmin=0, vmax=1,       title="Traversability (red=bad)")
         _draw_map(ax_gd, np.where(np.isfinite(gdf_np), gdf_np, np.nan),  "viridis_r", vmin=0, vmax=gdf_max, title="GDF [m]")
-        _overlay_maps([ax_tr, ax_gd], paths, goals, colors, rob_w, rob_h)
+        _overlay_maps([ax_tr, ax_gd], paths, goals, colors, rob_w, rob_h, resolution, n_cells)
     else:
         ax_tr.axis("off")
         ax_gd.axis("off")

@@ -1,12 +1,11 @@
-from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
 
 
-def truncated_normal_(tensor: torch.Tensor, mean: float = 0.0, std: float = 1.0) -> torch.Tensor:
+def truncated_normal_(tensor: torch.Tensor, mean: float = 0.0, std: float = 1.0, max_iters: int = 100) -> torch.Tensor:
     torch.nn.init.normal_(tensor, mean=mean, std=std)
-    while True:
+    for _ in range(max_iters):
         cond = (tensor < mean - 2 * std) | (tensor > mean + 2 * std)
         if not cond.any():
             break
@@ -14,25 +13,9 @@ def truncated_normal_(tensor: torch.Tensor, mean: float = 0.0, std: float = 1.0)
     return tensor
 
 
-BoundType = Union[float, Sequence[float]]
-
-
-@dataclass
-class MPPIConfig:
-    horizon: int
-    action_dim: int = 3
-    population_size: int = 1024
-    num_iterations: int = 5
-    beta: float = 0.7
-    gamma: float = 2.0
-    sigma: float = 0.3
-    provide_zero_action: bool = False
-    lower_bound: BoundType = -1.0
-    upper_bound: BoundType = 1.0
-
-
 class MPPIOptimizer:
-    def __init__(self, cfg: MPPIConfig, device: str):
+    def __init__(self, cfg, device: str):
+        """cfg: OmegaConf DictConfig (the mppi: section of build.yaml)."""
         self.cfg = cfg
         self.device = torch.device(device)
         self._allocate_from_cfg()
@@ -59,7 +42,7 @@ class MPPIOptimizer:
         best_traj = None
         best_value = -torch.inf
 
-        H, A = self.cfg.horizon, self.cfg.action_dim
+        H, A = self.cfg.horizon, 3
         P = self.cfg.population_size - (1 if self.cfg.provide_zero_action else 0)
 
         for _ in range(self.cfg.num_iterations):
@@ -98,12 +81,14 @@ class MPPIOptimizer:
 
     def _allocate_from_cfg(self) -> None:
         c = self.cfg
-        H, D = c.horizon, c.action_dim
+        H, D = c.horizon, 3
 
         self.mean = torch.zeros((H, D), device=self.device, dtype=torch.float32)
 
-        lb = torch.as_tensor(c.lower_bound, device=self.device, dtype=torch.float32)
-        ub = torch.as_tensor(c.upper_bound, device=self.device, dtype=torch.float32)
+        lb_raw = list(c.lower_bound) if hasattr(c.lower_bound, "__iter__") else c.lower_bound
+        ub_raw = list(c.upper_bound) if hasattr(c.upper_bound, "__iter__") else c.upper_bound
+        lb = torch.as_tensor(lb_raw, device=self.device, dtype=torch.float32)
+        ub = torch.as_tensor(ub_raw, device=self.device, dtype=torch.float32)
         if lb.ndim == 0:
             lb = lb.repeat(D)
         if ub.ndim == 0:

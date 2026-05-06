@@ -53,4 +53,4 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["limo*", "dataset*", "dataset_builder*", "helpers*", "mppi_planner*", "ros_package*", "utils*"]
+include = ["limo*", "dataset*", "dataset_builder*", "ros_package*", "utils*"]
