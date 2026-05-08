@@ -177,6 +177,8 @@ uv run dataset_builder/src/build_paths.py --config-name build_example dataset_ty
 
 The viewer shows elevation, traversability, and GDF maps in the bottom row, and camera images in the top row. Side camera images are included automatically if they were already downloaded (see below); if not, those panels are left blank without failing. The display updates every 5 frames (`viz_every: 5`); override with e.g. `viz_every=1` on the command line.
 
+![Dataset builder visualization](docs/dataset_builder_viz.png)
+
 ### Side cameras
 
 By default only the front camera and odometry are downloaded. To also pull the left and right cameras — required for training the side-camera model variant — pass `fetch_side_cams=true`:
