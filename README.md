@@ -175,7 +175,7 @@ Pass `viz=true` to watch the planner and maps live while building:
 uv run dataset_builder/src/build_paths.py --config-name build_example dataset_type=geo viz=true
 ```
 
-The viewer shows elevation, traversability, and GDF maps in the bottom row, and camera images in the top row. Side camera images are included automatically if they were already downloaded (see below); if not, those panels are left blank without failing.
+The viewer shows elevation, traversability, and GDF maps in the bottom row, and camera images in the top row. Side camera images are included automatically if they were already downloaded (see below); if not, those panels are left blank without failing. The display updates every 5 frames (`viz_every: 5`); override with e.g. `viz_every=1` on the command line.
 
 ### Side cameras
 
