@@ -19,7 +19,9 @@ def fast_gdf_wrapper(
         gdf: (1, 1, H, W) geodesic distances in the same units as the resolution caller
              uses (caller must multiply by resolution to get metres).
     """
-    mult = image.shape[-1] * image.shape[-2]  # sentinel: GDF values above this are unreachable
+    mult = (
+        image.shape[-1] * image.shape[-2]
+    )  # sentinel: GDF values above this are unreachable
     image = image.clone() * mult
 
     mask = torch.ones_like(image)

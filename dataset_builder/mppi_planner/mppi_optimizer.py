@@ -3,13 +3,17 @@ from typing import Optional, Tuple
 import torch
 
 
-def truncated_normal_(tensor: torch.Tensor, mean: float = 0.0, std: float = 1.0, max_iters: int = 100) -> torch.Tensor:
+def truncated_normal_(
+    tensor: torch.Tensor, mean: float = 0.0, std: float = 1.0, max_iters: int = 100
+) -> torch.Tensor:
     torch.nn.init.normal_(tensor, mean=mean, std=std)
     for _ in range(max_iters):
         cond = (tensor < mean - 2 * std) | (tensor > mean + 2 * std)
         if not cond.any():
             break
-        tensor[cond] = torch.normal(mean, std, size=(cond.sum().item(),), device=tensor.device)
+        tensor[cond] = torch.normal(
+            mean, std, size=(cond.sum().item(),), device=tensor.device
+        )
     return tensor
 
 
@@ -54,16 +58,23 @@ class MPPIOptimizer:
             constrained_var = torch.minimum(mv, self.var)
 
             population = noise * torch.sqrt(constrained_var).unsqueeze(0)
-            population[:, 0, :] += self.cfg.beta * self.mean[0, :] + (1.0 - self.cfg.beta) * past_action
+            population[:, 0, :] += (
+                self.cfg.beta * self.mean[0, :] + (1.0 - self.cfg.beta) * past_action
+            )
             for t in range(H - 1):
                 population[:, t + 1, :] += (
-                    self.cfg.beta * self.mean[t + 1, :] + (1.0 - self.cfg.beta) * population[:, t, :]
+                    self.cfg.beta * self.mean[t + 1, :]
+                    + (1.0 - self.cfg.beta) * population[:, t, :]
                 )
 
-            population = torch.clamp(population, self.lower_bound.unsqueeze(0), self.upper_bound.unsqueeze(0))
+            population = torch.clamp(
+                population, self.lower_bound.unsqueeze(0), self.upper_bound.unsqueeze(0)
+            )
 
             if self.cfg.provide_zero_action:
-                population = torch.cat([population, torch.zeros((1, H, A), device=self.device)], dim=0)
+                population = torch.cat(
+                    [population, torch.zeros((1, H, A), device=self.device)], dim=0
+                )
 
             values, _ = objective.evaluate(population)
             values[torch.isnan(values)] = -1e10
@@ -85,8 +96,12 @@ class MPPIOptimizer:
 
         self.mean = torch.zeros((H, D), device=self.device, dtype=torch.float32)
 
-        lb_raw = list(c.lower_bound) if hasattr(c.lower_bound, "__iter__") else c.lower_bound
-        ub_raw = list(c.upper_bound) if hasattr(c.upper_bound, "__iter__") else c.upper_bound
+        lb_raw = (
+            list(c.lower_bound) if hasattr(c.lower_bound, "__iter__") else c.lower_bound
+        )
+        ub_raw = (
+            list(c.upper_bound) if hasattr(c.upper_bound, "__iter__") else c.upper_bound
+        )
         lb = torch.as_tensor(lb_raw, device=self.device, dtype=torch.float32)
         ub = torch.as_tensor(ub_raw, device=self.device, dtype=torch.float32)
         if lb.ndim == 0:

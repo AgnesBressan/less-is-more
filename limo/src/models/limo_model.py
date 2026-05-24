@@ -193,8 +193,12 @@ class LimoModel(LightningModule):
             return (t.cpu().permute(0, 2, 3, 1).numpy() * 255).astype(np.uint8)
 
         images = _to_np(images)
-        images_left = _to_np(batch["image_left"][:num_imgs]) if "image_left" in batch else None
-        images_right = _to_np(batch["image_right"][:num_imgs]) if "image_right" in batch else None
+        images_left = (
+            _to_np(batch["image_left"][:num_imgs]) if "image_left" in batch else None
+        )
+        images_right = (
+            _to_np(batch["image_right"][:num_imgs]) if "image_right" in batch else None
+        )
 
         goals = goals.cpu().numpy()
 

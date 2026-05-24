@@ -7,8 +7,7 @@ from pathlib import Path
 class TraversabilityFilter(nn.Module):
     """Pretrained traversability CNN ported from elevation_mapping_cupy.
 
-    Source: https://github.com/leggedrobotics/elevation_mapping_cupy/blob/main/
-            elevation_mapping_cupy/script/elevation_mapping_cupy/traversability_filter.py
+    Source: https://github.com/leggedrobotics/elevation_mapping_cupy/blob/main/elevation_mapping_cupy/script/elevation_mapping_cupy/traversability_filter.py
     """
 
     def __init__(self, w1, w2, w3, w_out, use_bias=False):
@@ -38,7 +37,13 @@ class TraversabilityFilter(nn.Module):
 
 def get_filter_torch(device: str = "cuda") -> TraversabilityFilter:
     data = np.load(Path(__file__).parent / "weights.npz")
-    return TraversabilityFilter(
-        data["conv1_weight"], data["conv2_weight"],
-        data["conv3_weight"], data["conv_final_weight"],
-    ).to(device).eval()
+    return (
+        TraversabilityFilter(
+            data["conv1_weight"],
+            data["conv2_weight"],
+            data["conv3_weight"],
+            data["conv_final_weight"],
+        )
+        .to(device)
+        .eval()
+    )

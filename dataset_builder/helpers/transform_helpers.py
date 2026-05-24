@@ -29,7 +29,10 @@ def convert_se2_to_transform(se2: np.ndarray) -> np.ndarray:
         raise ValueError("se2 must be a 3-element vector [x, y, yaw]")
     x, y, yaw = se2
     c, s = np.cos(yaw), np.sin(yaw)
-    T = np.array([[c, -s, 0.0, x], [s, c, 0.0, y], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=float)
+    T = np.array(
+        [[c, -s, 0.0, x], [s, c, 0.0, y], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        dtype=float,
+    )
     return T
 
 
@@ -51,7 +54,9 @@ def convert_transform_to_se2(T: np.ndarray) -> np.ndarray:
     return np.array([x, y, yaw], dtype=float)
 
 
-def transform_se2_base_to_odom(se2_points_base: np.ndarray, T_odom_base: np.ndarray) -> np.ndarray:
+def transform_se2_base_to_odom(
+    se2_points_base: np.ndarray, T_odom_base: np.ndarray
+) -> np.ndarray:
     """
     Transform SE(2) poses from the 'base' frame into the 'odom' frame.
 
@@ -83,7 +88,9 @@ def transform_se2_base_to_odom(se2_points_base: np.ndarray, T_odom_base: np.ndar
     return se2_points_odom
 
 
-def transform_se2_odom_to_base(se2_points_odom: np.ndarray, T_odom_base: np.ndarray) -> np.ndarray:
+def transform_se2_odom_to_base(
+    se2_points_odom: np.ndarray, T_odom_base: np.ndarray
+) -> np.ndarray:
     """
     Transform SE(2) poses from the 'odom' frame into the 'base' frame.
 
@@ -111,7 +118,9 @@ def transform_se2_odom_to_base(se2_points_odom: np.ndarray, T_odom_base: np.ndar
     xy_path_base = r_base_odom @ xy_path_odom + t_base_odom
 
     yaw_path_base = se2_points_odom.T[2, None] - yaw
-    yaw_path_base = np.arctan2(np.sin(yaw_path_base), np.cos(yaw_path_base))  # limit to [-pi, pi]
+    yaw_path_base = np.arctan2(
+        np.sin(yaw_path_base), np.cos(yaw_path_base)
+    )  # limit to [-pi, pi]
 
     se2_path_base = np.concatenate([xy_path_base, yaw_path_base]).T
     return se2_path_base

@@ -65,21 +65,29 @@ class LocalLimoDataModule(LightningDataModule):
 
         from torchvision import transforms
 
-        transform = transforms.Compose([
-            transforms.Resize(self.image_size),
-            transforms.ToTensor(),
-        ])
+        transform = transforms.Compose(
+            [
+                transforms.Resize(self.image_size),
+                transforms.ToTensor(),
+            ]
+        )
 
         missions = parse_missions_csv(self.missions_csv)
         splits: dict[str, list[Dataset]] = defaultdict(list)
 
-        _zarr_dirs = {"tel": ["teleop_paths"], "geo": ["geometric_paths"], "aug": ["teleop_paths", "geometric_paths"]}
+        _zarr_dirs = {
+            "tel": ["teleop_paths"],
+            "geo": ["geometric_paths"],
+            "aug": ["teleop_paths", "geometric_paths"],
+        }
         required = _zarr_dirs[self.dataset_type]
 
         for mission, split in missions.items():
             mission_dir = self.dataset_folder / mission
             if not mission_dir.exists():
-                log.warning(f"Mission directory not found locally, skipping: {mission_dir}")
+                log.warning(
+                    f"Mission directory not found locally, skipping: {mission_dir}"
+                )
                 continue
             missing = [d for d in required if not (mission_dir / "data" / d).exists()]
             if missing:
@@ -103,11 +111,17 @@ class LocalLimoDataModule(LightningDataModule):
                 )
             )
 
-        self.data_train = ConcatDataset(splits["train"]) if splits.get("train") else None
+        self.data_train = (
+            ConcatDataset(splits["train"]) if splits.get("train") else None
+        )
         self.data_val = ConcatDataset(splits["val"]) if splits.get("val") else None
         self.data_test = ConcatDataset(splits["test"]) if splits.get("test") else None
 
-        for split_name, ds in [("train", self.data_train), ("val", self.data_val), ("test", self.data_test)]:
+        for split_name, ds in [
+            ("train", self.data_train),
+            ("val", self.data_val),
+            ("test", self.data_test),
+        ]:
             if ds is not None:
                 log.info(f"Split '{split_name}' has {len(ds)} samples")
 
@@ -143,4 +157,3 @@ class LocalLimoDataModule(LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
         )
-

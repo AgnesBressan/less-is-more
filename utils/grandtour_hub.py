@@ -11,7 +11,9 @@ log = logging.getLogger(__name__)
 
 HF_REPO_ID = "leggedrobotics/grand_tour_dataset"
 HF_REVISION_MAIN = "main"
-HF_REVISION_LIMO = "refs/pr/6"  # PR that adds limo paths (teleop_paths, geometric_paths)
+HF_REVISION_LIMO = (
+    "refs/pr/6"  # PR that adds limo paths (teleop_paths, geometric_paths)
+)
 
 IMAGE_TOPICS = {"hdr_front", "hdr_left", "hdr_right"}
 
@@ -56,9 +58,7 @@ def _topic_exists(mission_dir: Path, topic: str) -> bool:
     ).exists()
 
 
-def _extract_to_folder(
-    cache: Path, dest: Path, allow_patterns: list[str]
-) -> None:
+def _extract_to_folder(cache: Path, dest: Path, allow_patterns: list[str]) -> None:
     regex = _patterns_to_regex(allow_patterns)
     files = [f for f in cache.rglob("*") if regex.match(str(f.relative_to(cache)))]
     tar_files = [f for f in files if f.suffix == ".tar"]

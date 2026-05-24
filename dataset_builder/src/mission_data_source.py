@@ -24,11 +24,14 @@ from PIL import Image
 def _quat_to_matrix(xyzw: np.ndarray) -> np.ndarray:
     """Quaternion [x, y, z, w] -> 3x3 rotation matrix (numpy)."""
     x, y, z, w = xyzw
-    return np.array([
-        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
-        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
-        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
-    ], dtype=np.float64)
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float64,
+    )
 
 
 def _nearest_idx(timestamps: np.ndarray, t: float) -> int:
@@ -83,20 +86,28 @@ class GrandTourZarrSource:
         self.map_size = map_size
         self.map_resolution = map_resolution
 
-        self._z_cam = zarr.open_group(str(self.mission_dir / "data" / "hdr_front"), mode="r")
-        self._z_dlio = zarr.open_group(str(self.mission_dir / "data" / "dlio_map_odometry"), mode="r")
-        self._z_elev = zarr.open_group(str(self.mission_dir / "data" / "elevation_map"), mode="r")
+        self._z_cam = zarr.open_group(
+            str(self.mission_dir / "data" / "hdr_front"), mode="r"
+        )
+        self._z_dlio = zarr.open_group(
+            str(self.mission_dir / "data" / "dlio_map_odometry"), mode="r"
+        )
+        self._z_elev = zarr.open_group(
+            str(self.mission_dir / "data" / "elevation_map"), mode="r"
+        )
 
         self._cam_ts = np.array(self._z_cam["timestamp"])
         self._dlio_ts = np.array(self._z_dlio["timestamp"])
-        self._dlio_pos = np.array(self._z_dlio["pose_pos"])      # (M, 3)
+        self._dlio_pos = np.array(self._z_dlio["pose_pos"])  # (M, 3)
         self._dlio_orien = np.array(self._z_dlio["pose_orien"])  # (M, 4) xyzw
 
         self._side_ts: dict[str, np.ndarray | None] = {}
         for _cam in ("hdr_left", "hdr_right"):
             _zp = self.mission_dir / "data" / _cam
             if _zp.exists():
-                self._side_ts[_cam] = np.array(zarr.open_group(str(_zp), mode="r")["timestamp"])
+                self._side_ts[_cam] = np.array(
+                    zarr.open_group(str(_zp), mode="r")["timestamp"]
+                )
             else:
                 self._side_ts[_cam] = None
 
@@ -130,10 +141,12 @@ class GrandTourZarrSource:
         times = np.linspace(t0, t0 + duration, n)
         idxs = np.searchsorted(self._dlio_ts, times).clip(0, len(self._dlio_ts) - 1)
         prev = (idxs - 1).clip(0)
-        use_prev = np.abs(self._dlio_ts[prev] - times) < np.abs(self._dlio_ts[idxs] - times)
+        use_prev = np.abs(self._dlio_ts[prev] - times) < np.abs(
+            self._dlio_ts[idxs] - times
+        )
         idxs = np.where(use_prev, prev, idxs)
-        pos = self._dlio_pos[idxs]          # (n, 3)
-        orien = self._dlio_orien[idxs]      # (n, 4) xyzw
+        pos = self._dlio_pos[idxs]  # (n, 3)
+        orien = self._dlio_orien[idxs]  # (n, 4) xyzw
         x, y, z, w = orien[:, 0], orien[:, 1], orien[:, 2], orien[:, 3]
         yaw = np.arctan2(2 * (x * y + z * w), 1 - 2 * (y * y + z * z)) - np.pi / 2
         return np.column_stack([pos[:, 0], pos[:, 1], yaw]).astype(np.float32)

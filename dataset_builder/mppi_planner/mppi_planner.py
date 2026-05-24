@@ -1,4 +1,3 @@
-"""MPPI planner: ROS-free port from legacy/mppi_planner."""
 from __future__ import annotations
 
 import logging
@@ -22,9 +21,9 @@ log = logging.getLogger(__name__)
 class GridMap2D:
     """Robot-centric elevation grid. Indexed as elevation[x_idx, y_idx]."""
 
-    elevation: torch.Tensor   # (H, W) float32
+    elevation: torch.Tensor  # (H, W) float32
     resolution: float
-    origin_xy: torch.Tensor   # (2,) world (x, y) of cell (0, 0)
+    origin_xy: torch.Tensor  # (2,) world (x, y) of cell (0, 0)
     frame_id: str = "base"
 
     def to(self, device) -> "GridMap2D":
@@ -52,7 +51,12 @@ def max_pool(grid: torch.Tensor, n: int) -> torch.Tensor:
         return grid
     g = grid.float().unsqueeze(0).unsqueeze(0)
     k = 2 * n + 1
-    return F.max_pool2d(g, kernel_size=k, stride=1, padding=n).squeeze(0).squeeze(0).to(grid.dtype)
+    return (
+        F.max_pool2d(g, kernel_size=k, stride=1, padding=n)
+        .squeeze(0)
+        .squeeze(0)
+        .to(grid.dtype)
+    )
 
 
 def build_robot_footprint(rectangles, grid_resolution, device):
@@ -91,10 +95,15 @@ def clip_on_ray(bounds_hw, goal_ij: torch.Tensor) -> torch.Tensor:
     elif dy < 0:
         candidates.append((0 - centre[1]) / dy)
     t = min(c for c in candidates if c >= 0)
-    return (centre + d * t).round().clamp(
-        min=torch.tensor([0, 0], device=device),
-        max=torch.tensor([H - 1, W - 1], device=device),
-    ).to(dtype)
+    return (
+        (centre + d * t)
+        .round()
+        .clamp(
+            min=torch.tensor([0, 0], device=device),
+            max=torch.tensor([H - 1, W - 1], device=device),
+        )
+        .to(dtype)
+    )
 
 
 def smallest_angle(yaw1: torch.Tensor, yaw2) -> torch.Tensor:
@@ -118,10 +127,14 @@ class MPPIObjective:
     def set_map(self, gm: GridMap2D) -> None:
         self._gm = gm
         footprint = OmegaConf.to_container(self.cfg.footprint, resolve=True)
-        self._robot_footprint = build_robot_footprint(footprint, self._gm.resolution, self.device)
+        self._robot_footprint = build_robot_footprint(
+            footprint, self._gm.resolution, self.device
+        )
         self._trav = self._compute_traversability()
 
-    def set_observation(self, gm: GridMap2D, start: torch.Tensor, goal: torch.Tensor) -> None:
+    def set_observation(
+        self, gm: GridMap2D, start: torch.Tensor, goal: torch.Tensor
+    ) -> None:
         self._start = start
         self._goal = goal
         if gm is not self._gm:
@@ -162,11 +175,15 @@ class MPPIObjective:
         yaw_cum = torch.cumsum(wz, dim=1)
         # Use pre-step yaw for rotation: the heading the robot has when executing
         # velocity command at step t is yaw before wz[t] is applied.
-        yaw_rot = yaw0 + torch.cat([torch.zeros(P, 1, device=wz.device), yaw_cum[:, :-1]], dim=1)
+        yaw_rot = yaw0 + torch.cat(
+            [torch.zeros(P, 1, device=wz.device), yaw_cum[:, :-1]], dim=1
+        )
         yaw = yaw0 + yaw_cum  # output waypoint yaw (heading after each step)
         cos_y, sin_y = torch.cos(yaw_rot), torch.sin(yaw_rot)
-        R = torch.stack([torch.stack([cos_y, -sin_y], dim=-1),
-                         torch.stack([sin_y,  cos_y], dim=-1)], dim=-2)
+        R = torch.stack(
+            [torch.stack([cos_y, -sin_y], dim=-1), torch.stack([sin_y, cos_y], dim=-1)],
+            dim=-2,
+        )
         pos = torch.cumsum(torch.matmul(R, vxvy.unsqueeze(-1)).squeeze(-1), dim=1)
         pos[..., 0] += x0
         pos[..., 1] += y0
@@ -180,21 +197,32 @@ class MPPIObjective:
         ij = world_to_map_idx(states_xy, self._gm)
         gdf2d = self._gdf.squeeze(0) if self._gdf.dim() == 3 else self._gdf
         finite = torch.isfinite(gdf2d)
-        fill = gdf2d[finite].mean() if finite.any() else torch.tensor(0.0, device=gdf2d.device)
+        fill = (
+            gdf2d[finite].mean()
+            if finite.any()
+            else torch.tensor(0.0, device=gdf2d.device)
+        )
         gdf2d = torch.where(finite, gdf2d, fill)
 
         ij = ij.to(device=gdf2d.device, dtype=torch.long)
         Hg, Wg = gdf2d.shape
         v = ij[..., 0].clamp(0, Hg - 1)
         u = ij[..., 1].clamp(0, Wg - 1)
-        gdf = gdf2d.reshape(-1).index_select(0, (v * Wg + u).reshape(-1)).reshape(states_xy.shape[:-1])
+        gdf = (
+            gdf2d.reshape(-1)
+            .index_select(0, (v * Wg + u).reshape(-1))
+            .reshape(states_xy.shape[:-1])
+        )
         return torch.max(l2, gdf)
 
     @torch.no_grad()
     def states_cost(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         cfg = self.cfg
         trav_cost, trav_unknown = self.get_trav_cost(states)
-        trav_cost = trav_cost * cfg.traversability_cost + trav_unknown * cfg.traversability_unknown_cost
+        trav_cost = (
+            trav_cost * cfg.traversability_cost
+            + trav_unknown * cfg.traversability_unknown_cost
+        )
 
         control = (
             torch.abs(actions[..., 0]) * cfg.action_cost_trans_forward
@@ -208,11 +236,17 @@ class MPPIObjective:
         pos_cost = pos_cost - delta
 
         heading_offset = smallest_angle(states[..., 2], self._goal[2])
-        hw = torch.maximum(cfg.max_distance_for_heading_cost - dist, torch.tensor(0.0)).max(dim=0).values
+        hw = (
+            torch.maximum(cfg.max_distance_for_heading_cost - dist, torch.tensor(0.0))
+            .max(dim=0)
+            .values
+        )
         heading_cost = heading_offset * hw * cfg.heading_cost
 
         cost = pos_cost + control + heading_cost
-        at_goal = (heading_offset < cfg.heading_cost_at_goal_tolerance) & (dist < cfg.position_cost_at_goal_tolerance)
+        at_goal = (heading_offset < cfg.heading_cost_at_goal_tolerance) & (
+            dist < cfg.position_cost_at_goal_tolerance
+        )
         cost[at_goal] = -cfg.at_goal_reward
         cost += trav_cost
         return cost
@@ -249,13 +283,20 @@ class MPPIObjective:
         elev = self._gm.elevation.to(self.device)
         gdf_mask = (self._trav >= cfg.fatal_value).float()
         gdf_mask[torch.isnan(self._trav)] = 0.0
-        gdf_mask = (max_pool(gdf_mask, cfg.gdf_obstacle_buffer) > 0).float().unsqueeze(0)
-        goal_ij = clip_on_ray(elev.shape, world_to_map_idx(self._goal[None, :2], self._gm)[0])
-        return fast_gdf_wrapper(
-            gdf_mask.float()[None],
-            int(goal_ij[0]),
-            int(goal_ij[1]),
-        )[0] * self._gm.resolution
+        gdf_mask = (
+            (max_pool(gdf_mask, cfg.gdf_obstacle_buffer) > 0).float().unsqueeze(0)
+        )
+        goal_ij = clip_on_ray(
+            elev.shape, world_to_map_idx(self._goal[None, :2], self._gm)[0]
+        )
+        return (
+            fast_gdf_wrapper(
+                gdf_mask.float()[None],
+                int(goal_ij[0]),
+                int(goal_ij[1]),
+            )[0]
+            * self._gm.resolution
+        )
 
     @torch.no_grad()
     def get_trav_cost(self, states: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -265,12 +306,16 @@ class MPPIObjective:
 
         xy, yaw = states[..., :2], states[..., 2]
         cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
-        R = torch.stack([torch.stack([cos_y, -sin_y], dim=-1),
-                         torch.stack([sin_y,  cos_y], dim=-1)], dim=-2)
+        R = torch.stack(
+            [torch.stack([cos_y, -sin_y], dim=-1), torch.stack([sin_y, cos_y], dim=-1)],
+            dim=-2,
+        )
 
         fp = cells_xy.view(1, 1, E, 2).expand(P, H, E, 2)
-        wp = (torch.matmul(fp.view(P * H, E, 2), R.view(P * H, 2, 2).transpose(-1, -2))
-              + xy.view(P * H, 1, 2)).view(P, H, E, 2)
+        wp = (
+            torch.matmul(fp.view(P * H, E, 2), R.view(P * H, 2, 2).transpose(-1, -2))
+            + xy.view(P * H, 1, 2)
+        ).view(P, H, E, 2)
 
         ij = world_to_map_idx(wp, self._gm)
         m = valid_mask(ij.view(-1, 2), self._gm).view(P, H, E)
@@ -296,7 +341,9 @@ class MPPIPlanner:
         self.optimizer = MPPIOptimizer(cfg, device)
 
     @torch.no_grad()
-    def plan(self, gridmap: GridMap2D, start: torch.Tensor, goal: torch.Tensor) -> torch.Tensor:
+    def plan(
+        self, gridmap: GridMap2D, start: torch.Tensor, goal: torch.Tensor
+    ) -> torch.Tensor:
         """Returns (H, 3) SE(2) waypoints in the same frame as start/goal."""
         self.objective.set_observation(gridmap, start, goal)
         self.optimizer.reset()
