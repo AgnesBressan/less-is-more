@@ -1,22 +1,22 @@
 # Camera calibration parameters for front camera
 # Camera: hdr_front
 # Original resolution: 1920x1280
-# Resized for model input: 476x308 (W x H)
+# Resized for model input: 480x304 (W x H) -- DINOv3 ViT-S/16, patch_size=16
 # Distortion model: equidistant (fisheye)
 
-height: 308
-width: 476
+height: 304
+width: 480
 distortion_model: "equidistant"
 
-# Intrinsic matrix K (3x3, row-major), scaled for 476x308 input
-# scale_x = 476 / 1920, scale_y = 308 / 1280
+# Intrinsic matrix K (3x3, row-major), scaled for 480x304 input
+# scale_x = 480 / 1920, scale_y = 304 / 1280
 K:
-  - 244.05108430203476
+  - 246.101933749951
   - 0.0
-  - 236.11386145656376
+  - 238.0980115528374
   - 0.0
-  - 236.72937552218586
-  - 153.6724002262796
+  - 233.65496804787173
+  - 151.67665476879546
   - 0.0
   - 0.0
   - 1.0

@@ -393,7 +393,7 @@ def create_combined_visualization(
 
 
 def load_image_and_normalize(
-    image_path: str, target_size: Tuple[int, int] = (308, 476)
+    image_path: str, target_size: Tuple[int, int] = (304, 480)
 ) -> torch.Tensor:
     """
     Load image and normalize to tensor.

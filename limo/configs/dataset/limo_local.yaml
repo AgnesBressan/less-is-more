@@ -20,4 +20,4 @@ shuffle_test: False
 
 with_side_cams: False
 
-image_size: [308, 476]
+image_size: [304, 480]

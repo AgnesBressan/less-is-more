@@ -3,6 +3,13 @@ from torch import nn
 from torchvision import transforms
 from typing import Tuple
 
+# backbone_name -> Hugging Face Hub id. DINOv3 weights are gated; the HF repo
+# must be accepted (and `huggingface-cli login` run, or HF_TOKEN set) before
+# AutoModel.from_pretrained() below will succeed.
+_DINOV3_HF_IDS = {
+    "dinov3_vits16": "facebook/dinov3-vits16-pretrain-lvd1689m",
+}
+
 
 class LimoNet(nn.Module):
     def __init__(
@@ -10,10 +17,12 @@ class LimoNet(nn.Module):
         goal_dim: int = 3,
         path_length: int = 50,
         se2_dim: int = 3,
-        backbone_name: str = "dinov2_vits14",
+        backbone_name: str = "dinov3_vits16",
         pretrained: bool = True,
-        image_size: Tuple[int, int] = (308, 476),
-        patch_size: int = 14,
+        # o dinov3 usa patch_size=16, o dinov2 usa patch_size=14
+        # a altura e largura da imagem devem ser múltiplos do patch_size
+        image_size: Tuple[int, int] = (304, 480),
+        patch_size: int = 16,
         attn_heads: int = 6,
         decoder_layers: int = 4,  # number of Transformer decoder layers
         ff_dim_factor: int = 4,  # feed-forward hidden size = embed_dim * ff_dim_factor
@@ -54,11 +63,21 @@ class LimoNet(nn.Module):
         if self._initialized:
             return
 
-        self.backbone = torch.hub.load(
-            "facebookresearch/dinov2",
-            "dinov2_vits14",
-            pretrained=self.pretrained,
-        )
+        if self.backbone_name.startswith("dinov3"):
+            from transformers import AutoModel
+            # carrega o modelo DINOv3 do Hugging Face Hub. O HF repo deve ser aceito (e `huggingface-cli login` executado, ou HF_TOKEN definido) antes que AutoModel.from_pretrained() abaixo funcione.
+            hf_id = _DINOV3_HF_IDS[self.backbone_name]
+            self.backbone = AutoModel.from_pretrained(hf_id)
+            # define o embed_dim e num_register_tokens com base na configuração do backbone
+            self.embed_dim = self.backbone.config.hidden_size
+            self.num_register_tokens = self.backbone.config.num_register_tokens
+            # aqui verifica se o patch_size do backbone corresponde ao patch_size configurado
+            assert self.backbone.config.patch_size == self.patch_size, (
+                f"backbone patch_size={self.backbone.config.patch_size} does not "
+                f"match configured patch_size={self.patch_size}"
+            )
+        else:
+            raise ValueError(f"Unsupported backbone_name: {self.backbone_name!r}")
 
         for p in self.backbone.parameters():
             p.requires_grad = False
@@ -66,8 +85,6 @@ class LimoNet(nn.Module):
             if isinstance(m, nn.LayerNorm):
                 for p in m.parameters():
                     p.requires_grad = True
-
-        self.embed_dim = self.backbone.embed_dim
 
         self.row_embed = nn.Embedding(self.grid_h, self.embed_dim)
         self.col_embed = nn.Embedding(self.grid_w, self.embed_dim)
@@ -97,9 +114,15 @@ class LimoNet(nn.Module):
 
         B, device = image.size(0), image.device
 
-        tokens = self.backbone.forward_features(image)
-        patch_tokens = tokens["x_norm_patchtokens"]
+
+        last_hidden_state = self.backbone(pixel_values=image).last_hidden_state
+        patch_tokens = last_hidden_state[:, 1 + self.num_register_tokens :, :]
         N, D = patch_tokens.size(1), patch_tokens.size(2)
+        assert N == self.grid_h * self.grid_w, (
+            f"backbone returned {N} patch tokens, expected {self.grid_h * self.grid_w} "
+            f"({self.grid_h}x{self.grid_w}) for image_size={self.image_size}, "
+            f"patch_size={self.patch_size}"
+        )
 
         row_ids = torch.arange(self.grid_h, device=device)
         col_ids = torch.arange(self.grid_w, device=device)
@@ -135,7 +158,7 @@ if __name__ == "__main__":
 
     # dummy run
     batch = {
-        "image_front": torch.randn(2, 3, 308, 476),
+        "image_front": torch.randn(2, 3, 304, 480),
         "goal": torch.randn(2, 3),
     }
     out = model(batch)

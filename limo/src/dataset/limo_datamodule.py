@@ -24,7 +24,7 @@ class LimoDataModule(LightningDataModule):
         shuffle_val: bool = False,
         shuffle_test: bool = False,
         with_side_cams: bool = False,
-        image_size: Tuple[int, int] = (308, 476),
+        image_size: Tuple[int, int] = (304, 480),
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)

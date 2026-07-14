@@ -21,4 +21,4 @@ shuffle_test: False
 with_side_cams: False
 
 # Image size for transforms (height, width)
-image_size: [308, 476]
+image_size: [304, 480]

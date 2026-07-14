@@ -23,6 +23,7 @@ dependencies = [
   "types-pyyaml>=6.0.12.20250915",
   "safetensors>=0.4.5",
   "huggingface-hub>=1.4.1",
+  "transformers>=4.56.0",
   "zarr>=2.18.3",
   "tqdm>=4.0",
 ]

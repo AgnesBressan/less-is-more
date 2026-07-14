@@ -193,7 +193,7 @@ def get_dataset(
     dataset_folder: Path,
     missions_csv: Path,
     with_side_cams: bool = False,
-    image_size: Tuple[int, int] = (308, 476),
+    image_size: Tuple[int, int] = (304, 480),
 ):
     missions = parse_missions_csv(missions_csv)
 

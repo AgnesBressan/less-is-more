@@ -23,4 +23,4 @@ camera_info: ${paths.root_dir}/data/inference_example/camera_info.yaml
 output_dir: ${paths.root_dir}/data/inference_example/output
 
 # Visualization settings
-image_size: [308, 476]
+image_size: [304, 480]
